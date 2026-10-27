@@ -29,6 +29,18 @@ function log(msg,level='INFO'){const d=$('debug');d.textContent+=`\n[${level}] $
 function num(id){const n=Number($(id).value);return Number.isFinite(n)?n:0}
 function fmt(n){return (Math.round(n*1000)/1000).toString()}
 function dist(a,b){return Math.hypot(a[0]-b[0],a[1]-b[1])}
+function matMul(A,B){return [A[0]*B[0]+A[2]*B[1],A[1]*B[0]+A[3]*B[1],A[0]*B[2]+A[2]*B[3],A[1]*B[2]+A[3]*B[3],A[0]*B[4]+A[2]*B[5]+A[4],A[1]*B[4]+A[3]*B[5]+A[5]]}
+function matPt(m,p){return [m[0]*p[0]+m[2]*p[1]+m[4],m[1]*p[0]+m[3]*p[1]+m[5]]}
+function parseTransform(s){let m=[1,0,0,1,0,0],re=/([a-zA-Z]+)\(([^)]*)\)/g,k;
+while((k=re.exec(s||''))){let n=k[1].toLowerCase(),v=(k[2].match(/[-+]?(?:\d*\.\d+|\d+\.?\d*)(?:[eE][-+]?\d+)?/g)||[]).map(Number),t=[1,0,0,1,0,0];
+if(n==='matrix'&&v.length>=6)t=v.slice(0,6);else if(n==='translate')t=[1,0,0,1,v[0]||0,v[1]||0];
+else if(n==='scale'){let sx=v[0]??1,sy=v.length>1?v[1]:sx;t=[sx,0,0,sy,0,0]}
+else if(n==='rotate'){let a=(v[0]||0)*Math.PI/180,c=Math.cos(a),s=Math.sin(a),r=[c,s,-s,c,0,0];
+if(v.length>=3){let cx=v[1],cy=v[2];t=matMul(matMul([1,0,0,1,cx,cy],r),[1,0,0,1,-cx,-cy])}else t=r}
+else if(n==='skewx'){let a=Math.tan((v[0]||0)*Math.PI/180);t=[1,0,a,1,0,0]}
+else if(n==='skewy'){let a=Math.tan((v[0]||0)*Math.PI/180);t=[1,a,0,1,0,0]}
+m=matMul(m,t)}
+return m}
 function addPath(out,pts,closed=false){if(pts.length>1){let p=pts.map(q=>[q[0],q[1]]);if(closed&&dist(p[0],p[p.length-1])>1e-6)p.push([...p[0]]);out.push({pts:p,closed:closed||dist(p[0],p[p.length-1])<1e-5})}}
 function sampleCubic(p0,p1,p2,p3,out,tol=.8){let length=dist(p0,p1)+dist(p1,p2)+dist(p2,p3),n=Math.max(4,Math.min(100,Math.ceil(length/Math.max(tol,0.2))));for(let i=1;i<=n;i++){let t=i/n,u=1-t;out.push([u*u*u*p0[0]+3*u*u*t*p1[0]+3*u*t*t*p2[0]+t*t*t*p3[0],u*u*u*p0[1]+3*u*u*t*p1[1]+3*u*t*t*p2[1]+t*t*t*p3[1]])}}
 function sampleQuad(p0,p1,p2,out,tol=.8){let n=Math.max(4,Math.min(100,Math.ceil((dist(p0,p1)+dist(p1,p2))/Math.max(tol,.2))));for(let i=1;i<=n;i++){let t=i/n,u=1-t;out.push([u*u*p0[0]+2*u*t*p1[0]+t*t*p2[0],u*u*p0[1]+2*u*t*p1[1]+t*t*p2[1]])}}
@@ -46,18 +58,25 @@ let n=Math.max(6,Math.min(60,Math.ceil(dist(cur,p)/2)));for(let k=1;k<=n;k++){le
 log(`Niet-ondersteund padcommando: ${cmd}`,'WARN');break;
 }
 if(pts.length)addPath(out,pts);return out}
-function elementPoints(el,out){let tag=el.tagName.toLowerCase();if(['svg','g','a','defs','clipPath','metadata','title','desc'].includes(tag))return;
+function elementPoints(el,out,m){let tag=el.tagName.toLowerCase();
 const attr=k=>Number(el.getAttribute(k)||0);
-if(tag==='path'){let d=el.getAttribute('d');if(d)out.push(...pathData(d));return}
-if(tag==='line'){addPath(out,[[attr('x1'),attr('y1')],[attr('x2'),attr('y2')]]);return}
-if(tag==='polyline'||tag==='polygon'){let pts=(el.getAttribute('points')||'').trim().split(/[\s,]+/).filter(Boolean).map(Number);let p=[];for(let i=0;i+1<pts.length;i+=2)p.push([pts[i],pts[i+1]]);addPath(out,p,tag==='polygon');return}
-if(tag==='rect'){let x=attr('x'),y=attr('y'),w=attr('width'),h=attr('height');if(w>0&&h>0)addPath(out,[[x,y],[x+w,y],[x+w,y+h],[x,y+h]],true);return}
-if(tag==='circle'||tag==='ellipse'){let cx=attr('cx'),cy=attr('cy'),rx=tag==='circle'?attr('r'):attr('rx'),ry=tag==='circle'?rx:attr('ry');if(rx>0&&ry>0){let p=[];for(let i=0;i<=Math.max(24,Math.ceil(Math.PI*2*Math.max(rx,ry)/2));i++){let a=i/Math.max(24,Math.ceil(Math.PI*2*Math.max(rx,ry)/2))*Math.PI*2;p.push([cx+Math.cos(a)*rx,cy+Math.sin(a)*ry])}addPath(out,p,true)}return}
+let local=[];
+if(tag==='path'){let d=el.getAttribute('d');if(d)local.push(...pathData(d))}
+else if(tag==='line')addPath(local,[[attr('x1'),attr('y1')],[attr('x2'),attr('y2')]]);
+else if(tag==='polyline'||tag==='polygon'){let pts=(el.getAttribute('points')||'').trim().split(/[\s,]+/).filter(Boolean).map(Number);let p=[];for(let i=0;i+1<pts.length;i+=2)p.push([pts[i],pts[i+1]]);addPath(local,p,tag==='polygon')}
+else if(tag==='rect'){let x=attr('x'),y=attr('y'),w=attr('width'),h=attr('height');if(w>0&&h>0)addPath(local,[[x,y],[x+w,y],[x+w,y+h],[x,y+h]],true)}
+else if(tag==='circle'||tag==='ellipse'){let cx=attr('cx'),cy=attr('cy'),rx=tag==='circle'?attr('r'):attr('rx'),ry=tag==='circle'?rx:attr('ry');if(rx>0&&ry>0){let p=[];for(let i=0;i<=Math.max(24,Math.ceil(Math.PI*2*Math.max(rx,ry)/2));i++){let a=i/Math.max(24,Math.ceil(Math.PI*2*Math.max(rx,ry)/2))*Math.PI*2;p.push([cx+Math.cos(a)*rx,cy+Math.sin(a)*ry])}addPath(local,p,true)}}
 if(tag==='text')log('SVG-tekst wordt niet direct geplot. Zet tekst om naar paden (Inkscape: Object naar pad).','WARN');
+local.forEach(p=>out.push({closed:p.closed,pts:p.pts.map(q=>matPt(m,q))}));
 }
+function collectElements(el,out,m=[1,0,0,1,0,0]){if(!el||el.nodeType!==1)return;let tag=el.tagName.toLowerCase();
+if(['defs','clippath','metadata','title','desc','symbol','mask','pattern','marker'].includes(tag))return;
+let tr=el.getAttribute('transform'),mm=tr?matMul(m,parseTransform(tr)):m;
+if(['svg','g','a'].includes(tag)){Array.from(el.children).forEach(ch=>collectElements(ch,out,mm));return}
+elementPoints(el,out,mm);if(el.children&&el.children.length)Array.from(el.children).forEach(ch=>collectElements(ch,out,mm))}
 function parseSvg(text){let doc=new DOMParser().parseFromString(text,'image/svg+xml');if(doc.querySelector('parsererror'))throw Error('Ongeldige SVG-XML.');let root=doc.documentElement;if(root.tagName.toLowerCase()!=='svg')throw Error('Bestand bevat geen <svg>-element.');
 let vb=(root.getAttribute('viewBox')||'').trim().split(/[ ,]+/).map(Number),w=parseLen(root.getAttribute('width')),h=parseLen(root.getAttribute('height'));if(vb.length===4&&vb.every(Number.isFinite)&&vb[2]>0&&vb[3]>0){w=vb[2];h=vb[3];}
-if(!w)w=vb[2]||210;if(!h)h=vb[3]||297;let all=[];root.querySelectorAll('path,line,polyline,polygon,rect,circle,ellipse,text').forEach(el=>elementPoints(el,all));
+if(!w)w=vb[2]||210;if(!h)h=vb[3]||297;let all=[];collectElements(root,all);
 if(!all.length)throw Error('Geen ondersteunde tekenobjecten gevonden. Gebruik path/line/rect/circle/ellipse/polygon/polyline.');
 // Normalize viewBox origin and scale viewBox units into its physical width/height
 let vx=vb.length===4?vb[0]:0,vy=vb.length===4?vb[1]:0,vw=vb.length===4?vb[2]:w,vh=vb.length===4?vb[3]:h;
@@ -94,6 +113,6 @@ function crc32(data){let c=~0;for(let b of data){c^=b;for(let k=0;k<8;k++)c=c&1?
 $('downloadzip').onclick=()=>save(zipStore(filename+'_creality_'+mode+'.gcode',gcode),filename+'_creality_'+mode+'.zip');
 $('example').onclick=()=>{let s='<svg xmlns="http://www.w3.org/2000/svg" width="80mm" height="60mm" viewBox="0 0 80 60"><rect x="5" y="5" width="70" height="50"/><circle cx="40" cy="30" r="18"/><path d="M15 30 L65 30 M40 10 L40 50"/></svg>';try{loadSvg(s,'voorbeeld.svg')}catch(e){log(e.message,'ERROR')}};
 $('clearDebug').onclick=()=>$('debug').textContent='[INFO] Debuglog gewist.';
-$('runTests').onclick=()=>{let results=[];function test(n,fn){try{if(fn())results.push('PASS '+n);else results.push('FAIL '+n)}catch(e){results.push('FAIL '+n+' — '+e.message)}}test('SVG XML parses',()=>parseSvg('<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm"><rect width="5" height="5"/></svg>').paths.length===1);test('path M/L/Z is closed',()=>pathData('M0 0 L10 0 L10 10 Z')[0].closed);test('cubic curve is sampled',()=>pathData('M0 0 C0 10 10 10 10 0')[0].pts.length>4);test('G-code absolute/mm header',()=>{if(!paths.length){loadSvg('<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm"><rect width="5" height="5"/></svg>','test.svg')}let s=makeGcode();return s.includes('G21')&&s.includes('G90')&&s.includes('G1 Z')});test('ZIP CRC / signature generation',()=>zipStore('t.gcode','G21\n') instanceof Blob);results.forEach(x=>log(x,x.startsWith('PASS')?'OK':'ERROR'));log(`${results.filter(x=>x.startsWith('PASS')).length}/${results.length} tests geslaagd.`)};
+$('runTests').onclick=()=>{let results=[];function test(n,fn){try{if(fn())results.push('PASS '+n);else results.push('FAIL '+n)}catch(e){results.push('FAIL '+n+' — '+e.message)}}test('SVG XML parses',()=>parseSvg('<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm"><rect width="5" height="5"/></svg>').paths.length===1);test('path M/L/Z is closed',()=>pathData('M0 0 L10 0 L10 10 Z')[0].closed);test('cubic curve is sampled',()=>pathData('M0 0 C0 10 10 10 10 0')[0].pts.length>4);test('grouped compound paths keep transforms and order',()=>{let s='<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="60mm" viewBox="0 0 100 60"><g transform="translate(30,10)"><path d="M0 0 L10 0 L10 10 Z M2 2 L8 2 L8 8 Z"/><path d="M20 0 L30 0 L30 10 Z"/></g></svg>',r=parseSvg(s),b=getBounds(r.paths);return r.paths.length===3&&r.paths[0].closed&&r.paths[1].closed&&r.paths[2].closed&&b.minX>=30&&r.paths[0].pts[0][0]<r.paths[2].pts[0][0]});test('closed shape with inner hole keeps both loops',()=>{let s='<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="40mm" viewBox="0 0 40 40"><path d="M2 2 L38 2 L38 38 L2 38 Z M12 12 L28 12 L28 28 L12 28 Z"/></svg>',r=parseSvg(s);return r.paths.length===2&&r.paths.every(p=>p.closed)});test('single path still parses once',()=>parseSvg('<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm"><path d="M0 0 L20 0 L20 10"/></svg>').paths.length===1);test('G-code absolute/mm header',()=>{if(!paths.length){loadSvg('<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm"><rect width="5" height="5"/></svg>','test.svg')}let s=makeGcode();return s.includes('G21')&&s.includes('G90')&&s.includes('G1 Z')});test('ZIP CRC / signature generation',()=>zipStore('t.gcode','G21\n') instanceof Blob);results.forEach(x=>log(x,x.startsWith('PASS')?'OK':'ERROR'));log(`${results.filter(x=>x.startsWith('PASS')).length}/${results.length} tests geslaagd.`)};
 $('fillopts').classList.add('hidden');$('pauseWrap').classList.add('hidden');
 </script></body></html>
